@@ -50,8 +50,6 @@ export async function chargeUser(
 
     // Step 1: Create transfer transaction
     console.log(`[${new Date().toISOString()}] 🔨 STEP 1: Creating transaction...`);
-    console.log(`[${new Date().toISOString()}]    Contract: Coin`);
-    console.log(`[${new Date().toISOString()}]    Function: transfer`);
     console.log(`[${new Date().toISOString()}]    Args: [${SYSTEM_WALLET}, ${PAYMENT_ATOMIC}, AMA]`);
 
     const txData = await mcpClient.request({

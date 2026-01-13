@@ -95,7 +95,7 @@ export async function handleFaucet(
     // Update balance
     await updateUserBalance(user.discordId);
 
-    if (faucetResult.status = 'success') {
+    if (faucetResult.status === 'success') {
       await reply(
         `✅ **Claim Successful!**\n\n` +
         `Received: **${environment.FAUCET_AMOUNT} AMA**\n` +
