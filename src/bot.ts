@@ -130,42 +130,18 @@ discord.on('messageCreate', async (message) => {
       return handleFaucet(user as any, reply, mcpClient);
     }
 
-    // For all other queries, charge payment (10 AMA)
-    console.log(`[${new Date().toISOString()}] 💳 Processing PAID query (10 AMA)...`);
+    // For all other queries, AI handles payment via batch tools
+    console.log(`[${new Date().toISOString()}] 💳 Processing query (AI handles payment)...`);
 
     try {
-      // Attempt to charge user
-      const payment = await chargeUser(user, mcpClient);
+      const response = await handleQuery(query, user as any);
+      console.log(`[${new Date().toISOString()}] ✅ Sending response: "${response.substring(0, 100)}..."`);
+      await message.reply(response);
 
-      // Record successful payment
-      await recordTransaction(user.discordId, {
-        type: 'payment',
-        amount: payment.amount,
-        txHash: payment.txHash,
-        description: `Request: ${query.substring(0, 50)}${query.length > 50 ? '...' : ''}`
-      });
-
-      console.log(`[${new Date().toISOString()}] ✅ Payment confirmed: ${payment.txHash}`);
-
-    } catch (paymentError: any) {
-      console.error(`[${new Date().toISOString()}] ❌ Payment failed:`, paymentError.message);
-
-      // Update balance and check again
-      const currentBalance = await updateUserBalance(user.discordId);
-
-      return message.reply(
-        `❌ **Payment Failed**\n\n` +
-        `${paymentError.message}\n\n` +
-        `Your Balance is: **${currentBalance.toFixed(4)} AMA**\n` +
-        `You need at least: **10 AMA** to complete the request\n`
-      );
+    } catch (error: any) {
+      console.error(`[${new Date().toISOString()}] ❌ Error:`, error.message);
+      await message.reply('Sorry, something went wrong! Please try again.');
     }
-
-    // Process request after successful payment
-    // Process request after successful payment
-    const response = await handleQuery(query, user as any);
-    console.log(`[${new Date().toISOString()}] ✅ Sending response: "${response.substring(0, 100)}..."`);
-    await message.reply(response);
 
   } catch (error: any) {
     console.error(`[${new Date().toISOString()}] ❌ Error handling message:`, error.message);
@@ -282,15 +258,27 @@ DATABASE TOOLS (for current user):
 BLOCKCHAIN TOOLS (via MCP):
 - create_transaction, submit_transaction, etc.
 
-IMPORTANT: "transfer_ama" is a SPECIAL custom tool that automatically signs and submits transactions. 
-ALWAYS use "transfer_ama" when the user wants to send or transfer AMA tokens. 
-Do NOT use "create_transaction" for user transfers, as it requires manual signing.
+⚠️ CRITICAL PAYMENT TOOLS:
+- validate_balance_for_transfer: Check if user has funds for fee + transfer  
+- transfer_with_fee: Execute fee + transfer in ONE BATCH (2x faster). ONLY after validation confirms sufficient.
+
+WORKFLOW FOR TRANSFERS:
+1. Call validate_balance_for_transfer(discord_id, amount)
+2. If sufficient: Call transfer_with_fee(discord_id, recipient, amount) - handles EVERYTHING
+3. If insufficient: Tell user they need more funds
+
+Do NOT use \"create_transaction\" or \"transfer_ama\" for transfers. Use transfer_with_fee for batch execution.
 
 When user asks "my balance" or "my wallet", use get_user_balance.
 When user asks "my stats" or "my info", use get_user_stats.
 Always pass the user's discord_id when using database tools.
 
-CURRENT USER CONTEXT:
+📝 RESPONSE FORMATTING (CRITICAL):
+SUCCESS transfers: "✅ Sent X AMA to [address]. Total cost: Y AMA."
+- NO "batch", NO "fee breakdown", NO "parallel processing"
+FAILED transfers: "❌ Insufficient balance. Need X AMA, have Y AMA. Use /deposit to add funds."
+- NO fee breakdown in error messages
+Keep ALL responses under 100 words and user-friendly.
 - Discord ID: ${user?.discordId}
 - Wallet Address: ${user?.amadeusPublicKey}
 - Current Balance: ${user?.balance} AMA
