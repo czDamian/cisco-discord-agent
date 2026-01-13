@@ -1,0 +1,439 @@
+import { Client as MCPClient } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { ListToolsResultSchema, CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
+import { Client, GatewayIntentBits, ChannelType, Partials } from 'discord.js';
+import Anthropic from '@anthropic-ai/sdk';
+
+// Payment system imports
+import { startServer } from './server.js';
+import { connectToDatabase, getOrCreateUser, recordTransaction, updateUserBalance, getUserStats } from './utils/database.js';
+import { chargeUser, hasSufficientBalance } from './utils/payment.js';
+import { getAmadeusBalance } from './utils/amadeus.js';
+import { testEncryption } from './utils/encryption.js';
+import { environment } from './config/constants.js';
+// Custom database tools
+import { customTools } from './mcp/tools.js';
+
+// Free command handlers
+import { handleBalance, handleDeposit, handleStats, handleFaucet } from './handlers/freeCommands.js';
+
+const discordBotToken = environment.DISCORD_BOT_TOKEN;
+const apiKey = environment.ANTHROPIC_API_KEY;
+
+if (!discordBotToken || !apiKey) {
+  throw new Error('Missing environment variables');
+}
+
+const discord = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.DirectMessages
+  ],
+  partials: [Partials.Channel] // Required for DMs
+});
+
+const anthropic = new Anthropic({
+  apiKey
+});
+
+// Connect to MCP server
+let mcpClient: any;
+let mcpTools: any[] = [];
+
+async function initializeMCP() {
+  const transport = new StreamableHTTPClientTransport(
+    new URL('https://mcp.ama.one')
+  );
+
+  mcpClient = new MCPClient({
+    name: 'discord-ama-bot',
+    version: '1.0.0'
+  }, {
+    capabilities: {}
+  });
+
+  await mcpClient.connect(transport);
+
+  // Get available tools using modern request API
+  const toolsList = await mcpClient.request(
+    { method: 'tools/list', params: {} },
+    ListToolsResultSchema
+  );
+  mcpTools = toolsList.tools;
+
+  console.log('MCP connected. Available tools:', mcpTools.map((t: any) => t.name));
+  console.log('Custom tools loaded:', customTools.map(t => t.name));
+  console.log(`Total tools available: ${mcpTools.length + customTools.length}`);
+}
+
+// Export mcpClient for payment utilities
+export { mcpClient };
+
+discord.on('messageCreate', async (message) => {
+  if (!discord.user) {
+    console.log('❌ message not from a user');
+    return;
+  }
+  // Debug logging
+  console.log(`\n[${new Date().toISOString()}] 🔔 Message received:`);
+  console.log(`   Author: ${message.author.tag} (bot: ${message.author.bot})`);
+  console.log(`   Content: "${message.content}"`);
+
+  if (message.author.bot) {
+    console.log(`   ❌ Ignoring: Bot message`);
+    return;
+  }
+
+  // Accept messages if:
+  // 1. It's a DM (ChannelType.DM)
+  // 2. OR it mentions the bot in a server
+  const isDM = message.channel.type === ChannelType.DM;
+  const hasMention = message.mentions.has(discord.user);
+
+  if (!isDM && !hasMention) {
+    console.log(`   ❌ Ignoring: Not a DM and no mention`);
+    return;
+  }
+
+  console.log(`   ✅ Processing: ${isDM ? 'DM' : 'Mention in server'}`);
+
+  const query = message.content.replace(`<@${discord.user.id}>`, '').trim();
+  if (!query) {
+    console.log(`   ❌ Ignoring: Empty query after removing mention`);
+    return;
+  }
+
+  await message.channel.sendTyping();
+
+  try {
+    // Get or create user
+    const user = await getOrCreateUser(message.author.id, message.author.tag);
+    const reply = (msg: string) => message.reply(msg);
+
+    // FREE COMMANDS (no payment required)
+    if (query === '/balance' || query.toLowerCase() === 'balance') {
+      return handleBalance(user as any, reply);
+    }
+
+    if (query === '/deposit' || query.toLowerCase() === 'deposit') {
+      return handleDeposit(user as any, reply);
+    }
+
+    if (query === '/stats' || query.toLowerCase() === 'stats') {
+      return handleStats(user as any, reply);
+    }
+
+    // NEW: Faucet command - claim 100 testnet AMA
+    if (query.toLowerCase().includes('faucet') || query.toLowerCase().includes('claim')) {
+      return handleFaucet(user as any, reply, mcpClient);
+    }
+
+    // For all other queries, charge payment (10 AMA)
+    console.log(`[${new Date().toISOString()}] 💳 Processing PAID query (10 AMA)...`);
+
+    try {
+      // Attempt to charge user
+      const payment = await chargeUser(user, mcpClient);
+
+      // Record successful payment
+      await recordTransaction(user.discordId, {
+        type: 'payment',
+        amount: payment.amount,
+        txHash: payment.txHash,
+        description: `Request: ${query.substring(0, 50)}${query.length > 50 ? '...' : ''}`
+      });
+
+      console.log(`[${new Date().toISOString()}] ✅ Payment confirmed: ${payment.txHash}`);
+
+    } catch (paymentError: any) {
+      console.error(`[${new Date().toISOString()}] ❌ Payment failed:`, paymentError.message);
+
+      // Update balance and check again
+      const currentBalance = await updateUserBalance(user.discordId);
+
+      return message.reply(
+        `❌ **Payment Failed**\n\n` +
+        `${paymentError.message}\n\n` +
+        `Your Balance is: **${currentBalance.toFixed(4)} AMA**\n` +
+        `You need at least: **10 AMA** to complete the request\n`
+      );
+    }
+
+    // Process request after successful payment
+    // Process request after successful payment
+    const response = await handleQuery(query, user as any);
+    console.log(`[${new Date().toISOString()}] ✅ Sending response: "${response.substring(0, 100)}..."`);
+    await message.reply(response);
+
+  } catch (error: any) {
+    console.error(`[${new Date().toISOString()}] ❌ Error handling message:`, error.message);
+    console.error('Full error:', error);
+    await message.reply('Sorry, something went wrong! Please try again.');
+  }
+});
+
+// Handle slash command interactions
+discord.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  console.log(`\n[${new Date().toISOString()}] ⚡ Slash command received: /${interaction.commandName} from ${interaction.user.tag}`);
+
+  try {
+    // CRITICAL: Defer reply immediately to prevent 3-second timeout
+    await interaction.deferReply({ ephemeral: true });
+
+    // Get or create user
+    const user = await getOrCreateUser(interaction.user.id, interaction.user.tag);
+
+    if (interaction.commandName === 'balance') {
+      const balance = await getAmadeusBalance(user.amadeusPublicKey as string);
+      await updateUserBalance(user.discordId as string);
+
+      await interaction.editReply({
+        content:
+          `**Your Wallet**\n` +
+          `Balance: **${balance} AMA**\n` +
+          `Address: \`${user.amadeusPublicKey}\`\n` +
+          `Cost per request: 10 AMA`
+      });
+    }
+    else if (interaction.commandName === 'deposit') {
+      await interaction.editReply({
+        content:
+          `**Deposit AMA to Your Wallet**\n\n` +
+          `Send AMA from any wallet or exchange to:\n` +
+          `\`${user.amadeusPublicKey}\`\n\n` +
+          `After depositing, use \`/balance\` to check your balance.`
+      });
+    }
+    else if (interaction.commandName === 'stats') {
+      const stats = await getUserStats(user.discordId as string);
+      const balance = await getAmadeusBalance(stats.walletAddress);
+
+      await interaction.editReply({
+        content:
+          `**Your Statistics**\n` +
+          `Current Balance: ${balance} AMA\n` +
+          `Total Requests: ${stats.totalRequests}\n` +
+          `Total Spent: ${stats.totalSpent} AMA\n` +
+          `Member Since: ${stats.memberSince.toLocaleDateString()}`
+      });
+    }
+    else if (interaction.commandName === 'faucet') {
+      // Use handler for faucet
+      const reply = async (msg: string) => {
+        await interaction.editReply({ content: msg });
+      };
+      await handleFaucet(user as any, reply, mcpClient);
+    }
+  } catch (error: any) {
+    console.error(`[${new Date().toISOString()}] ❌ Error handling slash command:`, error.message);
+    await interaction.editReply({
+      content: 'Sorry, something went wrong! Please try again.'
+    });
+  }
+});
+
+async function handleQuery(userQuery: string, user?: any): Promise<string> {
+  console.log(`[${new Date().toISOString()}] 🤔 Processing query...`);
+
+  // First, ask Claude what it wants to do
+  let conversationMessages: any[] = [{
+    role: 'user',
+    content: userQuery
+  }];
+
+  let loopCount = 0;
+  const maxLoops = 5; // Prevent infinite loops
+
+  while (loopCount < maxLoops) {
+    loopCount++;
+    console.log(`[${new Date().toISOString()}] 🔄 Agentic loop iteration ${loopCount}/${maxLoops}`);
+
+    // Combine MCP tools and custom tools
+    const simplifiedMcpTools = mcpTools.map((tool: any) => ({
+      name: tool.name,
+      description: (tool.description || '').substring(0, 200), // Truncate long descriptions
+      input_schema: tool.inputSchema
+    }));
+
+    const simplifiedCustomTools = customTools.map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      input_schema: tool.inputSchema
+    }));
+
+    const allTools = [...simplifiedMcpTools, ...simplifiedCustomTools];
+
+    console.log(`[${new Date().toISOString()}] 🧠 Calling Claude with ${conversationMessages.length} messages and ${allTools.length} tools (${mcpTools.length} MCP + ${customTools.length} custom)...`);
+
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 1024,
+      system: `You are an AI Agent with access to Amadeus blockchain tools AND user database tools.
+
+DATABASE TOOLS (for current user):
+- get_user_info: Get user wallet, balance, and stats
+- get_user_balance: Get real-time AMA balance  
+- get_user_stats: Get usage statistics
+
+BLOCKCHAIN TOOLS (via MCP):
+- create_transaction, submit_transaction, etc.
+
+IMPORTANT: "transfer_ama" is a SPECIAL custom tool that automatically signs and submits transactions. 
+ALWAYS use "transfer_ama" when the user wants to send or transfer AMA tokens. 
+Do NOT use "create_transaction" for user transfers, as it requires manual signing.
+
+When user asks "my balance" or "my wallet", use get_user_balance.
+When user asks "my stats" or "my info", use get_user_stats.
+Always pass the user's discord_id when using database tools.
+
+CURRENT USER CONTEXT:
+- Discord ID: ${user?.discordId}
+- Wallet Address: ${user?.amadeusPublicKey}
+- Current Balance: ${user?.balance} AMA
+
+Use this wallet address for any transactions requested by the user.
+
+Keep final responses under 100 words.`,
+      messages: conversationMessages,
+      tools: allTools
+    });
+
+    console.log(`[${new Date().toISOString()}] 📝 Claude response received (${response.content.length} content blocks)`);
+
+    // Check if Claude wants to use a tool
+    const toolUse: any = response.content.find((block: any) => block.type === 'tool_use');
+
+    if (!toolUse) {
+      // No tool use, return the text response
+      const text = response.content
+        .filter((block: any) => block.type === 'text')
+        .map((block: any) => block.text)
+        .join('\n');
+      console.log(`[${new Date().toISOString()}] ✅ Final response ready (no tool use)`);
+      return text;
+    }
+
+    console.log(`[${new Date().toISOString()}] 🔧 Tool requested: ${toolUse.name}`);
+    console.log(`[${new Date().toISOString()}] 📋 Tool arguments:`, JSON.stringify(toolUse.input, null, 2));
+
+    try {
+      let toolContent: string;
+
+      // Check if it's a custom tool
+      const customTool = customTools.find(t => t.name === toolUse.name);
+
+      if (customTool) {
+        // Execute custom tool
+        console.log(`[${new Date().toISOString()}] 🗄️  Executing CUSTOM tool: ${customTool.name}`);
+
+        // Inject discord_id if not provided
+        const toolInput = { ...toolUse.input };
+        if (!toolInput.discord_id && user?.discordId) {
+          toolInput.discord_id = user.discordId;
+          console.log(`[${new Date().toISOString()}] 💉 Injected discord_id: ${user.discordId}`);
+        }
+
+        const result = await customTool.handler(toolInput, mcpClient);
+        toolContent = JSON.stringify(result, null, 2);
+        console.log(`[${new Date().toISOString()}] ✅ Custom tool result: ${toolContent.substring(0, 200)}...`);
+
+      } else {
+        // Execute MCP tool
+        console.log(`[${new Date().toISOString()}] 🌐 Executing MCP tool: ${toolUse.name}`);
+
+        const toolResult = await mcpClient.request(
+          {
+            method: 'tools/call',
+            params: {
+              name: toolUse.name,
+              arguments: toolUse.input
+            }
+          },
+          CallToolResultSchema
+        );
+
+        console.log(`[${new Date().toISOString()}] ✅ Tool result received:`, toolResult.content?.length, 'content items');
+
+        // Extract only the text content from the tool result to avoid token bloat
+        toolContent = toolResult.content
+          .filter((item: any) => item.type === 'text')
+          .map((item: any) => item.text)
+          .join('\n');
+
+        console.log(`[${new Date().toISOString()}] 📄 Extracted tool content (${toolContent.length} chars): ${toolContent.substring(0, 200)}...`);
+      }
+
+      // Add tool result to conversation
+      conversationMessages.push({
+        role: 'assistant',
+        content: response.content
+      });
+
+      conversationMessages.push({
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: toolUse.id,
+          content: toolContent
+        }]
+      });
+
+      // Keep conversation history manageable - only keep last 6 messages
+      // This prevents token limit errors
+      if (conversationMessages.length > 6) {
+        console.log(`[${new Date().toISOString()}] ✂️ Trimming conversation history from ${conversationMessages.length} to 6 messages`);
+        conversationMessages = conversationMessages.slice(-6);
+      }
+    } catch (error: any) {
+      console.error(`[${new Date().toISOString()}] ❌ Tool call error for ${toolUse.name}:`, error.message);
+
+      // Return error to Claude so it can handle it gracefully
+      conversationMessages.push({
+        role: 'assistant',
+        content: response.content
+      });
+
+      conversationMessages.push({
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: toolUse.id,
+          content: `Error calling tool: ${error.message}`,
+          is_error: true
+        }]
+      });
+    }
+  }
+
+  console.log(`[${new Date().toISOString()}] ⚠️ Max loop iterations reached`);
+  return "I've reached my processing limit. Please try asking your question differently.";
+}
+
+// Start bot
+async function start() {
+  console.log('\n🚀 Starting AMA Discord Bot...\n');
+
+  // Test encryption
+  console.log('🔐 Testing encryption...');
+  if (!testEncryption()) {
+    throw new Error('Encryption test failed! Check ENCRYPTION_KEY in .env');
+  }
+  await connectToDatabase();
+  await initializeMCP();
+  startServer();
+
+  // Login to Discord
+  await discord.login(discordBotToken);
+  console.log('✅ Discord bot ready!');
+  console.log('\n📋 Available commands:');
+  console.log('   /balance - Check your wallet balance');
+  console.log('   /deposit - Get your wallet address');
+  console.log('   /stats   - View your usage statistics');
+  console.log('\n💡 Mention the bot in your channel or send a DM to use (costs 10 AMA per request)\n');
+}
+
+start().catch(console.error);
