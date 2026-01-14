@@ -245,15 +245,25 @@ async function handleQuery(userQuery: string, user?: any): Promise<string> {
 
     console.log(`[${new Date().toISOString()}] 🧠 Calling Claude with ${conversationMessages.length} messages and ${allTools.length} tools (${mcpTools.length} MCP + ${customTools.length} custom)...`);
 
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 1024,
-      system: `You are an AI Agent with access to Amadeus blockchain tools AND user database tools.
+    // Helper function to call Claude with retry logic for 529 errors
+    const callClaude = async () => {
+      const maxRetries = 3;
+      let initialDelay = 2000; // Start with 2 seconds
 
-DATABASE TOOLS (for current user):
-- get_user_info: Get user wallet, balance, and stats
-- get_user_balance: Get real-time AMA balance  
-- get_user_stats: Get usage statistics
+      for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+        try {
+          return await anthropic.messages.create({
+            model: 'claude-sonnet-4-5-20250929',
+            max_tokens: 1024,
+            system: `You are an AI Agent with access to Amadeus blockchain tools AND user database tools.
+
+CURRENT USER CONTEXT:
+- Discord ID: ${user?.discordId}
+- Wallet Address: ${user?.amadeusPublicKey}
+- Current Balance: ${user?.balance} AMA
+
+Available tools:
+${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
 
 BLOCKCHAIN TOOLS (via MCP):
 - create_transaction, submit_transaction, etc.
@@ -267,7 +277,7 @@ WORKFLOW FOR TRANSFERS:
 2. If sufficient: Call transfer_with_fee(discord_id, recipient, amount) - handles EVERYTHING
 3. If insufficient: Tell user they need more funds
 
-Do NOT use \"create_transaction\" or \"transfer_ama\" for transfers. Use transfer_with_fee for batch execution.
+Do NOT use "create_transaction" or "transfer_ama" for transfers. Use transfer_with_fee for batch execution.
 
 When user asks "my balance" or "my wallet", use get_user_balance.
 When user asks "my stats" or "my info", use get_user_stats.
@@ -278,17 +288,30 @@ SUCCESS transfers: "✅ Sent X AMA to [address]. Total cost: Y AMA."
 - NO "batch", NO "fee breakdown", NO "parallel processing"
 FAILED transfers: "❌ Insufficient balance. Need X AMA, have Y AMA. Use /deposit to add funds."
 - NO fee breakdown in error messages
-Keep ALL responses under 100 words and user-friendly.
-- Discord ID: ${user?.discordId}
-- Wallet Address: ${user?.amadeusPublicKey}
-- Current Balance: ${user?.balance} AMA
+Keep ALL responses under 100 words and user-friendly.`,
+            messages: conversationMessages,
+            tools: allTools
+          });
+        } catch (error: any) {
+          if (error.status === 529 || (error.error && error.error.type === 'overloaded_error')) {
+            if (attempt <= maxRetries) {
+              const delay = initialDelay * Math.pow(2, attempt - 1);
+              console.log(`[${new Date().toISOString()}] ⏳ Claude overloaded (529). Retrying in ${delay}ms... (Attempt ${attempt}/${maxRetries})`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+              throw error; // Max retries reached
+            }
+          } else {
+            throw error; // Other error
+          }
+        }
+      }
+      throw new Error('Claude retry loop failed unexpected');
+    };
 
-Use this wallet address for any transactions requested by the user.
+    const response = await callClaude();
 
-Keep final responses under 100 words.`,
-      messages: conversationMessages,
-      tools: allTools
-    });
+
 
     console.log(`[${new Date().toISOString()}] 📝 Claude response received (${response.content.length} content blocks)`);
 
