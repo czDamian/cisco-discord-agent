@@ -370,11 +370,28 @@ Keep final responses under 100 words.`,
         }]
       });
 
-      // Keep conversation history manageable - only keep last 6 messages
-      // This prevents token limit errors
-      if (conversationMessages.length > 6) {
-        console.log(`[${new Date().toISOString()}] ✂️ Trimming conversation history from ${conversationMessages.length} to 6 messages`);
-        conversationMessages = conversationMessages.slice(-6);
+      // Keep conversation history manageable - only keep last 12 messages
+      // IMPORTANT: Never trim in the middle of a tool_use/tool_result pair
+      if (conversationMessages.length > 12) {
+        console.log(`[${new Date().toISOString()}] ✂️ Trimming conversation history from ${conversationMessages.length} messages`);
+
+        // Find a safe point to trim (never split tool pairs)
+        let trimIndex = conversationMessages.length - 12;
+
+        // Move back if we're trimming in the middle of an assistant message
+        while (trimIndex > 0 && conversationMessages[trimIndex]?.role === 'assistant') {
+          trimIndex--;
+        }
+
+        // If we're about to trim right before a tool_result, include its tool_use
+        if (trimIndex > 0 &&
+          conversationMessages[trimIndex].role === 'user' &&
+          conversationMessages[trimIndex].content?.[0]?.type === 'tool_result') {
+          trimIndex = Math.max(0, trimIndex - 2);
+        }
+
+        conversationMessages = conversationMessages.slice(trimIndex);
+        console.log(`[${new Date().toISOString()}] ✅ Trimmed to ${conversationMessages.length} messages (preserved tool pairs)`);
       }
     } catch (error: any) {
       console.error(`[${new Date().toISOString()}] ❌ Tool call error for ${toolUse.name}:`, error.message);
