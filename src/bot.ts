@@ -372,10 +372,10 @@ Keep final responses under 100 words.`,
 
       // Keep conversation history manageable - only trim if REALLY long
       // Disabled aggressive trimming to prevent breaking tool pairs
-      if (conversationMessages.length > 50) {
-        console.log(`[${new Date().toISOString()}] ✂️ Trimming conversation history from ${conversationMessages.length} to last 20`);
-        conversationMessages = conversationMessages.slice(-20);
-      }
+      // if (conversationMessages.length > 50) {
+      //   console.log(`[${new Date().toISOString()}] ✂️ Trimming conversation history from ${conversationMessages.length} to last 20`);
+      //   conversationMessages = conversationMessages.slice(-20);
+      // }
     } catch (error: any) {
       console.error(`[${new Date().toISOString()}] ❌ Tool call error for ${toolUse.name}:`, error.message);
 
