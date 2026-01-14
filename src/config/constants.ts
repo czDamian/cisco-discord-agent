@@ -15,7 +15,7 @@ export const environment = {
   DISCORD_BOT_TOKEN: process.env.DISCORD_BOT_TOKEN!,
   DISCORD_CLIENT_ID: process.env.DISCORD_CLIENT_ID!,
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY!,
-  ANTHROPIC_MODEL: 'claude-sonnet-4-5-20250929',
+  ANTHROPIC_MODEL: 'claude-haiku-4-5-20251001',
   MAX_TOKENS: 1024,
   MCP_SERVER_URL: 'https://mcp.ama.one',
   ENCRYPTION_KEY: process.env.ENCRYPTION_KEY!,

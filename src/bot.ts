@@ -248,13 +248,13 @@ async function handleQuery(userQuery: string, user?: any): Promise<string> {
     // Helper function to call Claude with retry logic for 529 errors
     const callClaude = async () => {
       const maxRetries = 3;
-      let initialDelay = 2000; // Start with 2 seconds
+      let initialDelay = 4000; // Start with 4 seconds
 
       for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
         try {
           return await anthropic.messages.create({
-            model: 'claude-sonnet-4-5-20250929',
-            max_tokens: 1024,
+            model: environment.ANTHROPIC_MODEL,
+            max_tokens: environment.MAX_TOKENS,
             system: `You are an AI Agent with access to Amadeus blockchain tools AND user database tools.
 
 CURRENT USER CONTEXT:
