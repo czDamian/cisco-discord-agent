@@ -292,10 +292,10 @@ Keep final responses under 100 words.`,
 
     console.log(`[${new Date().toISOString()}] 📝 Claude response received (${response.content.length} content blocks)`);
 
-    // Check if Claude wants to use a tool
-    const toolUse: any = response.content.find((block: any) => block.type === 'tool_use');
+    // Check if Claude wants to use tools (can be multiple)
+    const toolUses: any[] = response.content.filter((block: any) => block.type === 'tool_use');
 
-    if (!toolUse) {
+    if (toolUses.length === 0) {
       // No tool use, return the text response
       const text = response.content
         .filter((block: any) => block.type === 'text')
@@ -305,95 +305,92 @@ Keep final responses under 100 words.`,
       return text;
     }
 
-    console.log(`[${new Date().toISOString()}] 🔧 Tool requested: ${toolUse.name}`);
-    console.log(`[${new Date().toISOString()}] 📋 Tool arguments:`, JSON.stringify(toolUse.input, null, 2));
+    console.log(`[${new Date().toISOString()}] 🔧 Tools requested: ${toolUses.length}`);
 
-    try {
-      let toolContent: string;
+    // Add assistant response ONCE (with all tool uses)
+    conversationMessages.push({
+      role: 'assistant',
+      content: response.content
+    });
 
-      // Check if it's a custom tool
-      const customTool = customTools.find(t => t.name === toolUse.name);
+    // Process EACH tool use and add its result
+    for (const toolUse of toolUses) {
+      console.log(`[${new Date().toISOString()}] 🔧 Processing tool: ${toolUse.name}`);
+      console.log(`[${new Date().toISOString()}] 📋 Tool arguments:`, JSON.stringify(toolUse.input, null, 2));
 
-      if (customTool) {
-        // Execute custom tool
-        console.log(`[${new Date().toISOString()}] 🗄️  Executing CUSTOM tool: ${customTool.name}`);
+      try {
+        let toolContent: string;
 
-        // Inject discord_id if not provided
-        const toolInput = { ...toolUse.input };
-        if (!toolInput.discord_id && user?.discordId) {
-          toolInput.discord_id = user.discordId;
-          console.log(`[${new Date().toISOString()}] 💉 Injected discord_id: ${user.discordId}`);
+        // Check if it's a custom tool
+        const customTool = customTools.find(t => t.name === toolUse.name);
+
+        if (customTool) {
+          // Execute custom tool
+          console.log(`[${new Date().toISOString()}] 🗄️  Executing CUSTOM tool: ${customTool.name}`);
+
+          // Inject discord_id if not provided
+          const toolInput = { ...toolUse.input };
+          if (!toolInput.discord_id && user?.discordId) {
+            toolInput.discord_id = user.discordId;
+            console.log(`[${new Date().toISOString()}] 💉 Injected discord_id: ${user.discordId}`);
+          }
+
+          const result = await customTool.handler(toolInput, mcpClient);
+          toolContent = JSON.stringify(result, null, 2);
+          console.log(`[${new Date().toISOString()}] ✅ Custom tool result: ${toolContent.substring(0, 200)}...`);
+
+        } else {
+          // Execute MCP tool
+          console.log(`[${new Date().toISOString()}] 🌐 Executing MCP tool: ${toolUse.name}`);
+
+          const toolResult = await mcpClient.request(
+            {
+              method: 'tools/call',
+              params: {
+                name: toolUse.name,
+                arguments: toolUse.input
+              }
+            },
+            CallToolResultSchema
+          );
+
+          console.log(`[${new Date().toISOString()}] ✅ Tool result received:`, toolResult.content?.length, 'content items');
+
+          // Extract only the text content from the tool result to avoid token bloat
+          toolContent = toolResult.content
+            .filter((item: any) => item.type === 'text')
+            .map((item: any) => item.text)
+            .join('\n');
+
+          console.log(`[${new Date().toISOString()}] 📄 Extracted tool content (${toolContent.length} chars): ${toolContent.substring(0, 200)}...`);
         }
 
-        const result = await customTool.handler(toolInput, mcpClient);
-        toolContent = JSON.stringify(result, null, 2);
-        console.log(`[${new Date().toISOString()}] ✅ Custom tool result: ${toolContent.substring(0, 200)}...`);
+        // Add THIS tool's result to conversation
+        conversationMessages.push({
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: toolContent
+          }]
+        });
 
-      } else {
-        // Execute MCP tool
-        console.log(`[${new Date().toISOString()}] 🌐 Executing MCP tool: ${toolUse.name}`);
+        console.log(`[${new Date().toISOString()}] ✅ Added tool_result for ${toolUse.name}`);
 
-        const toolResult = await mcpClient.request(
-          {
-            method: 'tools/call',
-            params: {
-              name: toolUse.name,
-              arguments: toolUse.input
-            }
-          },
-          CallToolResultSchema
-        );
+      } catch (error: any) {
+        console.error(`[${new Date().toISOString()}] ❌ Tool call error for ${toolUse.name}:`, error.message);
 
-        console.log(`[${new Date().toISOString()}] ✅ Tool result received:`, toolResult.content?.length, 'content items');
-
-        // Extract only the text content from the tool result to avoid token bloat
-        toolContent = toolResult.content
-          .filter((item: any) => item.type === 'text')
-          .map((item: any) => item.text)
-          .join('\n');
-
-        console.log(`[${new Date().toISOString()}] 📄 Extracted tool content (${toolContent.length} chars): ${toolContent.substring(0, 200)}...`);
+        // Add error result for THIS tool
+        conversationMessages.push({
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: `Error calling tool: ${error.message}`,
+            is_error: true
+          }]
+        });
       }
-
-      // Add tool result to conversation
-      conversationMessages.push({
-        role: 'assistant',
-        content: response.content
-      });
-
-      conversationMessages.push({
-        role: 'user',
-        content: [{
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
-          content: toolContent
-        }]
-      });
-
-      // Keep conversation history manageable - only trim if REALLY long
-      // Disabled aggressive trimming to prevent breaking tool pairs
-      // if (conversationMessages.length > 50) {
-      //   console.log(`[${new Date().toISOString()}] ✂️ Trimming conversation history from ${conversationMessages.length} to last 20`);
-      //   conversationMessages = conversationMessages.slice(-20);
-      // }
-    } catch (error: any) {
-      console.error(`[${new Date().toISOString()}] ❌ Tool call error for ${toolUse.name}:`, error.message);
-
-      // Return error to Claude so it can handle it gracefully
-      conversationMessages.push({
-        role: 'assistant',
-        content: response.content
-      });
-
-      conversationMessages.push({
-        role: 'user',
-        content: [{
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
-          content: `Error calling tool: ${error.message}`,
-          is_error: true
-        }]
-      });
     }
   }
 
