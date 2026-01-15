@@ -6,6 +6,8 @@
 
 Cisco is an AI-powered Discord bot with Amadeus blockchain integration and a pay-per-request system integrated.
 
+### **[Try Cisco on Discord](https://discord.com/oauth2/authorize?client_id=1460026359752429813&permissions=277025646656&integration_type=0&scope=bot+applications.commands)**
+
 ---
 
 ## 🎯 Concept

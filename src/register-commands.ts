@@ -16,7 +16,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('faucet')
-    .setDescription('Claim 100 testnet AMA tokens (once per wallet)')
+    .setDescription('Claim 100 testnet AMA tokens (once per IP address)')
 ].map(command => command.toJSON());
 
 // Register commands

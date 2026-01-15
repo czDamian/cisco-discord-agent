@@ -125,8 +125,8 @@ discord.on('messageCreate', async (message) => {
       return handleStats(user as any, reply);
     }
 
-    // NEW: Faucet command - claim 100 testnet AMA
-    if (query.toLowerCase().includes('faucet') || query.toLowerCase().includes('claim')) {
+    // Faucet command - claim 100 testnet AMA
+    if (query === 'faucet' || query.toLowerCase() === 'faucet') {
       return handleFaucet(user as any, reply, mcpClient);
     }
 
@@ -255,7 +255,7 @@ async function handleQuery(userQuery: string, user?: any): Promise<string> {
           return await anthropic.messages.create({
             model: environment.ANTHROPIC_MODEL,
             max_tokens: environment.MAX_TOKENS,
-            system: `You are an AI Agent with access to Amadeus blockchain tools AND user database tools.
+            system: `You are Cisco,an AI Agent with access to Amadeus blockchain tools AND user database tools.
 
 CURRENT USER CONTEXT:
 - Discord ID: ${user?.discordId}
@@ -288,7 +288,7 @@ SUCCESS transfers: "✅ Sent X AMA to [address]. Total cost: Y AMA."
 - NO "batch", NO "fee breakdown", NO "parallel processing"
 FAILED transfers: "❌ Insufficient balance. Need X AMA, have Y AMA. Use /deposit to add funds."
 - NO fee breakdown in error messages
-Keep ALL responses under 100 words and user-friendly.`,
+Keep ALL responses under 100 words, simple, straight to the point, no detailed explanations, no jargon and user-friendly.`,
             messages: conversationMessages,
             tools: allTools
           });
