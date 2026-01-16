@@ -5,8 +5,8 @@ import "dotenv/config"
  * All environment variables and constants exported from a single object
  */
 export const environment = {
-  PAYMENT_AMOUNT: 10,              // 10 AMA per request
-  MIN_BALANCE: 10,                   // Minimum balance to process request
+  PAYMENT_AMOUNT: 1,              // 1 AMA per request
+  MIN_BALANCE: 2,                   // Minimum balance to process request
   FAUCET_AMOUNT: 100,                 // Amount claimed from the faucet 
   SYSTEM_WALLET_ADDRESS: process.env.SYSTEM_WALLET_ADDRESS!,
   TESTNET_RPC: process.env.TESTNET_RPC!,
@@ -16,7 +16,8 @@ export const environment = {
   DISCORD_CLIENT_ID: process.env.DISCORD_CLIENT_ID!,
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY!,
   ANTHROPIC_MODEL: 'claude-haiku-4-5-20251001',
-  MAX_TOKENS: 1024,
+  MAX_TOKENS: 4096,
+  MAX_TOOL_OUTPUT_CHARS: 30000, // Truncate tool outputs to ~7.5k tokens
   MCP_SERVER_URL: 'https://mcp.ama.one',
   ENCRYPTION_KEY: process.env.ENCRYPTION_KEY!,
   ENCRYPTION_ALGORITHM: 'aes-256-gcm' as const,

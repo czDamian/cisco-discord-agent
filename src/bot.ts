@@ -171,8 +171,7 @@ discord.on('interactionCreate', async (interaction) => {
         content:
           `**Your Wallet**\n` +
           `Balance: **${balance} AMA**\n` +
-          `Address: \`${user.amadeusPublicKey}\`\n` +
-          `Cost per request: 10 AMA`
+          `Address: \`${user.amadeusPublicKey}\`\n`
       });
     }
     else if (interaction.commandName === 'deposit') {
@@ -255,7 +254,7 @@ async function handleQuery(userQuery: string, user?: any): Promise<string> {
           return await anthropic.messages.create({
             model: environment.ANTHROPIC_MODEL,
             max_tokens: environment.MAX_TOKENS,
-            system: `You are Cisco,an AI Agent with access to Amadeus blockchain tools AND user database tools.
+            system: `You are Cisco,a conversational AI Agent with access to Amadeus blockchain tools AND user database tools.
 
 CURRENT USER CONTEXT:
 - Discord ID: ${user?.discordId}
@@ -360,6 +359,14 @@ Keep ALL responses under 100 words, simple, straight to the point, no detailed e
 
           const result = await customTool.handler(toolInput, mcpClient);
           toolContent = JSON.stringify(result, null, 2);
+
+          // Truncate if too long (prevents context explosion)
+          if (toolContent.length > environment.MAX_TOOL_OUTPUT_CHARS) {
+            console.log(`[${new Date().toISOString()}] ✂️ Truncating custom tool result (${toolContent.length} > ${environment.MAX_TOOL_OUTPUT_CHARS})`);
+            toolContent = toolContent.substring(0, environment.MAX_TOOL_OUTPUT_CHARS) +
+              `\n... [Content truncated. Original size: ${toolContent.length} chars]`;
+          }
+
           console.log(`[${new Date().toISOString()}] ✅ Custom tool result: ${toolContent.substring(0, 200)}...`);
 
         } else {
@@ -384,6 +391,13 @@ Keep ALL responses under 100 words, simple, straight to the point, no detailed e
             .filter((item: any) => item.type === 'text')
             .map((item: any) => item.text)
             .join('\n');
+
+          // Truncate if too long
+          if (toolContent.length > environment.MAX_TOOL_OUTPUT_CHARS) {
+            console.log(`[${new Date().toISOString()}] ✂️ Truncating MCP tool result (${toolContent.length} > ${environment.MAX_TOOL_OUTPUT_CHARS})`);
+            toolContent = toolContent.substring(0, environment.MAX_TOOL_OUTPUT_CHARS) +
+              `\n... [Content truncated. Original size: ${toolContent.length} chars]`;
+          }
 
           console.log(`[${new Date().toISOString()}] 📄 Extracted tool content (${toolContent.length} chars): ${toolContent.substring(0, 200)}...`);
         }
@@ -441,7 +455,7 @@ async function start() {
   console.log('   /balance - Check your wallet balance');
   console.log('   /deposit - Get your wallet address');
   console.log('   /stats   - View your usage statistics');
-  console.log('\n💡 Mention the bot in your channel or send a DM to use (costs 10 AMA per request)\n');
+  console.log('\n💡 Mention the bot in your channel or send a DM to use (costs 1 AMA per request)\n');
 }
 
 start().catch(console.error);

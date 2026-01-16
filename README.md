@@ -35,7 +35,7 @@ Cisco is a Discord bot that seamlessly integrates Claude AI with Amadeus blockch
 - 🤖 **AI Assistant** - Claude-powered responses with Amadeus blockchain tools
 - 💰 **Auto-Generated Wallets** - Each user gets a personal Amadeus wallet
 - 🔒 **Encrypted Storage** - Private keys encrypted with AES-256-GCM
-- 💸 **Pay-Per-Request** - Automatic 10 AMA charge per query
+- 💸 **Pay-Per-Request** - Automatic 1 AMA charge per query
 - 📊 **Usage Tracking** - Transaction history and statistics
 - 🔧 **MCP Integration** - Direct blockchain access via Model Context Protocol
 
@@ -188,7 +188,7 @@ Note: Advanced Amadeus features like uPoW (Useful Proof-of-Work), WASM runtime, 
 ## 💰 Monetization Path
 
 ### Current Revenue Model
-- **Pay-per-request**: 10 AMA per AI query (configurable via `PAYMENT_AMOUNT` env variable)
+- **Pay-per-request**: 1 AMA per AI query (configurable via `PAYMENT_AMOUNT` env variable)
 - **Transaction fees**: Automated blockchain payments to system wallet
 - **Scaling**: Revenue grows linearly with user base and query volume
 - **No subscriptions**: Fair, usage-based pricing
@@ -200,7 +200,7 @@ Note: Advanced Amadeus features like uPoW (Useful Proof-of-Work), WASM runtime, 
 - **Total cost per query**: ~$0.003 + blockchain fees
 
 ### Revenue Projections
-- **Break-even**: ~17,000 requests/month at 10 AMA per request
+- **Break-even**: ~17,000 requests/month at 1 AMA per request
 - **Example scenario**: 100 active users averaging 5 queries/day = 15,000 requests/month
 - **Profit margin**: ~40% after API costs (assuming AMA price stability)
 - **Scalability**: Linear scaling with increasing users, no infrastructure bottlenecks
@@ -342,7 +342,7 @@ Mention the bot with your question or send a **DM** to the bot:
 @BotName send 10 AMA to 6cgywWe4bPYyMtBdRnfbYeuim9bDExDHpyrWL1oXbz3JFUrgNLy88vayDkC3Mto7tu from my wallet
 ```
 
-**Cost**: Pay-per-request system charges 10 AMA per request (automatically deducted)
+**Cost**: Pay-per-request system charges 1 AMA per request (automatically deducted)
 
 ---
 
@@ -445,7 +445,7 @@ node -e "import('./utils/amadeus.js').then(a => a.generateAmadeusWallet())"
 Adjust in `.env`:
 
 ```env
-PAYMENT_AMOUNT=10          # AMA per request
+PAYMENT_AMOUNT=1         # AMA per request
 SYSTEM_WALLET_ADDRESS=...     # Receives payments
 ```
 
@@ -461,7 +461,7 @@ MONGODB_URI=<your_mongodb_uri>
 
 **Payment Failed**
 - Check user wallet balance with `/balance`
-- Ensure wallet has > 10 AMA
+- Ensure wallet has > 2 AMA
 - Verify user deposited to correct address
 
 **Encryption Test Failed**
